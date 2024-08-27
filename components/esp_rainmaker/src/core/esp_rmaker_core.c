@@ -487,6 +487,9 @@ static void esp_rmaker_task(void *data)
         goto rmaker_end;
     }
 #endif /* CONFIG_ESP_RMAKER_LOCAL_CTRL_ENABLE */
+    ESP_LOGI(TAG, "Waiting for Wi-Fi Provisioning stopped");
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    // xEventGroupWaitBits(rmaker_core_event_group, MQTT_CONNECTED_EVENT, false, true, portMAX_DELAY);
     err = esp_rmaker_mqtt_connect();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_rmaker_mqtt_connect() returned %d. Aborting", err);
