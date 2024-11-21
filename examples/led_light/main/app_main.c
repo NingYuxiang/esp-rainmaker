@@ -19,10 +19,12 @@
 #include <esp_rmaker_schedule.h>
 #include <esp_rmaker_console.h>
 #include <esp_rmaker_scenes.h>
-
+#include "driver/temperature_sensor.h"
 #include <app_wifi.h>
 #include <app_insights.h>
-
+#include <esp_diagnostics.h>
+#include <esp_diagnostics_metrics.h>
+// #include "esp_diagnostics_internal.h"
 #include "app_priv.h"
 
 static const char *TAG = "app_main";
@@ -118,6 +120,30 @@ static esp_err_t bulk_write_cb(const esp_rmaker_device_t *device, const esp_rmak
     }
     return ESP_OK;
 }
+float tsens_value;
+extern uint16_t g_value;
+void temperature_sensor_task(void *pvParameter)
+{
+    ESP_LOGI(TAG, "Install temperature sensor, expected temp ranger range: 10~50 ℃");
+    temperature_sensor_handle_t temp_sensor = NULL;
+    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+    ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor_config, &temp_sensor));
+    ESP_ERROR_CHECK(temperature_sensor_enable(temp_sensor));
+
+    while (1) {
+        esp_err_t ret;
+        ret = temperature_sensor_get_celsius(temp_sensor, &tsens_value);
+        ESP_LOGI(TAG, "Temperature value %.02f ℃ error = %d", tsens_value,ret);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (tsens_value>100) {
+            app_light_set_brightness(10);
+        } else if (tsens_value<100) {
+            app_light_set_brightness(80);
+        }
+        esp_diag_metrics_add_float("temp1", tsens_value);
+    }
+}
+
 
 void app_main()
 {
@@ -153,7 +179,7 @@ void app_main()
     }
 
     /* Create a device and add the relevant parameters to it */
-    light_device = esp_rmaker_lightbulb_device_create("Light", NULL, DEFAULT_POWER);
+    light_device = esp_rmaker_lightbulb_device_create("Light_c5_T2_2G", NULL, DEFAULT_POWER);
     esp_rmaker_device_add_bulk_cb(light_device, bulk_write_cb, NULL);
 
     esp_rmaker_device_add_param(light_device, esp_rmaker_brightness_param_create(ESP_RMAKER_DEF_BRIGHTNESS_NAME, DEFAULT_BRIGHTNESS));
@@ -185,6 +211,8 @@ void app_main()
     /* Register a command for demonstration */
     esp_rmaker_cmd_register(ESP_RMAKER_CMD_CUSTOM_START, ESP_RMAKER_USER_ROLE_PRIMARY_USER | ESP_RMAKER_USER_ROLE_SECONDARY_USER, led_light_cmd_handler, false, NULL);
 #endif
+        /* Register a metrics to track room temperature */
+
 
     /* Start the ESP RainMaker Agent */
     esp_rmaker_start();
@@ -196,6 +224,18 @@ void app_main()
      * after a connection has been successfully established
      */
     err = app_wifi_start(POP_TYPE_RANDOM);
+
+    example_ledc_init();
+    xTaskCreate(temperature_sensor_task, "temperature_sensor_task", 3 * 1024, NULL, 4, NULL);
+    app_light_set_brightness(10);
+
+    
+    esp_diag_metrics_register("temp", "temp1", "Room temperature", "room", ESP_DIAG_DATA_TYPE_FLOAT);
+
+    /* Record a data point for room temperature */
+    // uint32_t room_temp = get_room_temperature();
+    esp_diag_metrics_add_float("temp1", tsens_value);
+
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Could not start Wifi. Aborting!!!");
         vTaskDelay(5000/portTICK_PERIOD_MS);
